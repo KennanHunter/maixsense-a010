@@ -2,6 +2,7 @@
 name = "maixsense-a010"
 version = "0.1.0"
 edition = "2021"
+default-run = "maixsense-a010"
 
 [dependencies]
 serialport = "4.7.0"

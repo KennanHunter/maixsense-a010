@@ -1,12 +1,7 @@
-mod frame;
-
-use frame::{Frame, FrameHead};
-use serialport::SerialPort;
+use maixsense_a010::frame::{Frame, FrameHead};
+use maixsense_a010::SerialPortWrapper;
 use std::io::Read;
-use std::{
-    io::{self, Write},
-    time::Duration,
-};
+use std::{io::Write, time::Duration};
 
 fn main() {
     let ports = serialport::available_ports().expect("No ports found!");
@@ -15,7 +10,7 @@ fn main() {
     }
 
     let mut reader = SerialPortWrapper::new(
-        serialport::new("COM4", 115200)
+        serialport::new("COM9", 115200)
             .timeout(Duration::from_secs(5))
             .open()
             .unwrap(),
@@ -27,26 +22,34 @@ fn main() {
         reader.port.baud_rate().unwrap()
     );
 
-    println!("sending AT");
-    // Sanity check to ensure the camera is at this COM port
-    reader.write_all(b"AT\r\n").unwrap();
+    // println!("sending AT");
+    // // Sanity check to ensure the camera is at this COM port
+    // reader.write_all(b"AT\r\n").unwrap();
 
-    println!("reading");
+    // println!("reading");
 
-    let ok_res = reader.read_byte_slice::<4>();
+    // let ok_res = reader.read_byte_slice::<4>();
 
-    let response = String::from_utf8_lossy(&ok_res).to_string();
+    // let response = String::from_utf8_lossy(&ok_res).to_string();
 
-    println!("Read {:?} bytes: {}", ok_res.len(), response.trim());
+    // println!("Read {:?} bytes: {}", ok_res.len(), response.trim());
+
+    // assert_eq!("OK", response.trim());
 
     // Starts LCD + USB output
     // https://wiki.sipeed.com/hardware/en/maixsense/maixsense-a010/at_command_en.html#DISP-instruction
     reader.write_all(b"AT+DISP=3\r\n").unwrap();
 
-    reader.reset_count();
+        // read to next frame start
+    loop {
+        reader.reset_count();
+        if reader.read_byte_slice::<2>() == [0x00, 0xFF] {
+            break;
+        }
+    }
 
     let frame_head = FrameHead {
-        frame_begin_flag: reader.read_byte_slice(),
+        frame_begin_flag: [0x00, 0xFF],
         frame_data_len: reader.read_u16(),
         reserved1: reader.read_u8(),
         output_mode: reader.read_u8(),
@@ -62,10 +65,7 @@ fn main() {
         reserved3: reader.read_u8(),
     };
 
-    let frame_begin_flag_size = 2;
-    let extra_header_size: usize = size_of::<FrameHead>() - frame_begin_flag_size;
-
-    let mut payload = Vec::with_capacity(frame_head.frame_data_len as usize - extra_header_size);
+    let mut payload = Vec::with_capacity(frame_head.frame_data_len as usize - 2);
 
     reader.read_exact(&mut payload).unwrap();
 
@@ -81,64 +81,4 @@ fn main() {
     println!("Lower eight bits of sum: {:02x}", sum);
 
     assert_eq!(reader.read_u8(), 0xDD)
-}
-
-pub struct SerialPortWrapper {
-    pub port: Box<dyn SerialPort>,
-    pub internal_buff: Vec<u8>,
-    count: u128,
-}
-
-impl SerialPortWrapper {
-    pub fn new(reader: Box<dyn SerialPort>) -> SerialPortWrapper {
-        SerialPortWrapper {
-            port: reader,
-            internal_buff: vec![0; 4],
-            count: 0,
-        }
-    }
-
-    pub fn read_byte_slice<const N: usize>(&mut self) -> [u8; N] {
-        self.internal_buff.resize(N, 0);
-
-        self.port.read_exact(&mut self.internal_buff).unwrap();
-
-        for byte in &self.internal_buff {
-            self.count += byte.clone() as u128;
-        }
-
-        return TryInto::<[u8; N]>::try_into(self.internal_buff.as_slice()).unwrap();
-    }
-
-    pub fn read_u8(&mut self) -> u8 {
-        u8::from_le_bytes(self.read_byte_slice())
-    }
-
-    pub fn read_u16(&mut self) -> u16 {
-        u16::from_le_bytes(self.read_byte_slice())
-    }
-
-    pub fn reset_count(&mut self) {
-        self.count = 0;
-    }
-
-    pub fn count(&self) -> u128 {
-        self.count
-    }
-}
-
-impl Read for SerialPortWrapper {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.port.read(buf)
-    }
-}
-
-impl Write for SerialPortWrapper {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.port.write(buf)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.port.flush()
-    }
 }
